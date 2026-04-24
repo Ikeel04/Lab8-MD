@@ -152,3 +152,86 @@ knitr::kable(tabla_clases,
 ```
 
 Las propiedades económicas tienen un precio de hasta 141 USD por noche, las intermedias entre 141 y 264, y las caras superan los 264. Con 17,630, 17,615 y 18,128 observaciones respectivamente en entrenamiento, las clases se miran balanceadas, lo que es una condición favorable para SVM ya que el hiperplano separador no se verá forzado hacia ninguna clase dominante.
+
+## Inciso 4
+### Generación de modelos SVM
+```{r modelo 1}
+# modelo 1
+set.seed(123)
+svm_lineal_1 <- svm(
+  price_category ~ .,
+  data   = train_svm,
+  kernel = "linear",
+  cost   = 0.1,
+  scale  = FALSE
+)
+summary(svm_lineal_1)
+```
+
+```{r modelo 2}
+# modelo 2
+set.seed(123)
+svm_lineal_2 <- svm(
+  price_category ~ .,
+  data   = train_svm,
+  kernel = "linear",
+  cost   = 10,
+  scale  = FALSE
+)
+summary(svm_lineal_2)
+```
+
+```{r modelo 3}
+# modelo 3
+set.seed(123)
+svm_rbf_1 <- svm(
+  price_category ~ .,
+  data   = train_svm,
+  kernel = "radial",
+  cost   = 1,
+  gamma  = 0.01,
+  scale  = FALSE
+)
+summary(svm_rbf_1)
+```
+
+```{r modelo 4}
+# modelo 4
+set.seed(123)
+svm_poly_1 <- svm(
+  price_category ~ .,
+  data   = train_svm,
+  kernel = "polynomial",
+  cost   = 5,
+  gamma  = 0.01,
+  degree = 3,
+  scale  = FALSE
+)
+summary(svm_poly_1)
+```
+Se entrenaron cuatro modelos SVM con diferentes kernels y parámetros para comparar su desempeño. Dos modelos utilizaron kernel lineal variando el costo (C=0.1 y C=10), uno utilizó kernel RBF (C=1, γ=0.01) y otro kernel polinomial (C=5, γ=0.01, d=3). Esto permite evaluar desde el modelo más simple hasta el más flexible.
+
+## Inciso 5
+### Predicción
+```{r predicciones}
+# Modelo 1 – Lineal, C = 0.1
+pred_lineal_1 <- predict(svm_lineal_1, newdata = test_svm)
+cm1 <- confusionMatrix(pred_lineal_1, test_svm$price_category)
+cm1$overall
+
+# Modelo 2 – Lineal, C = 10
+pred_lineal_2 <- predict(svm_lineal_2, newdata = test_svm)
+cm2 <- confusionMatrix(pred_lineal_2, test_svm$price_category)
+cm2$overall
+
+# Modelo 3 – RBF, C = 1, gamma = 0.01
+pred_rbf_1 <- predict(svm_rbf_1, newdata = test_svm)
+cm3 <- confusionMatrix(pred_rbf_1, test_svm$price_category)
+cm3$overall
+
+# Modelo 4 – Polinomial, C = 5, gamma = 0.01, d = 3
+pred_poly_1 <- predict(svm_poly_1, newdata = test_svm)
+cm4 <- confusionMatrix(pred_poly_1, test_svm$price_category)
+cm4$overall
+```
+Los cuatro modelos SVM presentan un desempeño moderado. El kernel RBF fue el mejor con 61.5% de accuracy y Kappa de 0.42, seguido de los dos modelos lineales que obtuvieron exactamente el mismo resultado (59.7%), lo que indica que variar el costo no tuvo efecto en este caso. El modelo polinomial fue el de menor desempeño con 53.7%, sugiriendo que el grado 3 generó una frontera demasiado compleja para este dataset. Los valores de Kappa entre 0.31 y 0.42 reflejan un acuerdo justo a moderado, esperado dado el traslape natural entre las categorías de precio.
