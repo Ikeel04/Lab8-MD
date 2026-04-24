@@ -21,6 +21,8 @@ library(e1071)
 library(tidyr)
 library(scales)
 library(kableExtra)
+library(reshape2)
+library(gridExtra)
 ```
 
 ```{r carga-datos}
@@ -235,3 +237,77 @@ cm4 <- confusionMatrix(pred_poly_1, test_svm$price_category)
 cm4$overall
 ```
 Los cuatro modelos SVM presentan un desempeño moderado. El kernel RBF fue el mejor con 61.5% de accuracy y Kappa de 0.42, seguido de los dos modelos lineales que obtuvieron exactamente el mismo resultado (59.7%), lo que indica que variar el costo no tuvo efecto en este caso. El modelo polinomial fue el de menor desempeño con 53.7%, sugiriendo que el grado 3 generó una frontera demasiado compleja para este dataset. Los valores de Kappa entre 0.31 y 0.42 reflejan un acuerdo justo a moderado, esperado dado el traslape natural entre las categorías de precio.
+
+```{r}
+# Función para graficar matriz de confusión
+plot_cm <- function(cm, titulo) {
+  cm_table <- as.data.frame(cm$table)
+  
+  ggplot(cm_table, aes(x = Reference, y = Prediction, fill = Freq)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = Freq), size = 5, fontface = "bold") +
+    scale_fill_gradient(low = "#f7f7f7", high = "#2c7bb6") +
+    labs(title = titulo,
+         subtitle = paste0("Accuracy: ", round(cm$overall["Accuracy"] * 100, 2), 
+                           "%  |  Kappa: ", round(cm$overall["Kappa"], 3)),
+         x = "Clase Real", y = "Clase Predicha", fill = "Frecuencia") +
+    theme_minimal() +
+    theme(plot.title = element_text(face = "bold", size = 13),
+          axis.text = element_text(size = 11))
+}
+
+# Gráficas individuales
+plot_cm(cm1, "Modelo 1 – Kernel Lineal (C = 0.1)")
+plot_cm(cm2, "Modelo 2 – Kernel Lineal (C = 10)")
+plot_cm(cm3, "Modelo 3 – Kernel RBF (C = 1, γ = 0.01)")
+plot_cm(cm4, "Modelo 4 – Kernel Polinomial (C = 5, γ = 0.01, d = 3)")
+```
+
+```{r}
+# Panel comparativo de los 4 modelos
+g1 <- plot_cm(cm1, "Lineal C=0.1")
+g2 <- plot_cm(cm2, "Lineal C=10")
+g3 <- plot_cm(cm3, "RBF γ=0.01")
+g4 <- plot_cm(cm4, "Polinomial d=3")
+
+grid.arrange(g1, g2, g3, g4, ncol = 2,
+             top = "Comparación de Matrices de Confusión – Modelos SVM")
+```
+
+Los cuatro modelos fueron evaluados sobre 22,873 observaciones de prueba. El kernel RBF fue el mejor con 61.50% de accuracy y Kappa de 0.42, seguido de los dos modelos lineales con resultados casi idénticos (~59.7%), lo que indica que variar el costo entre 0.1 y 10 no tuvo efecto relevante. El modelo polinomial fue el peor con 53.67% y Kappa de 0.31.
+
+En todos los modelos el patrón de error es consistente: la clase Intermedia concentra la mayor cantidad de errores debido al traslape natural con las categorías Económica y Cara en las variables físicas del dataset. La clase Cara es la mejor clasificada en todos los casos, ya que sus características (mayor capacidad y habitaciones) la diferencian más claramente de las otras dos.
+
+```{r}
+## Inciso 7
+### Análisis de sobreajuste
+
+# Predicciones sobre entrenamiento para comparar con prueba
+pred_train_1 <- predict(svm_lineal_1, newdata = train_svm)
+pred_train_2 <- predict(svm_lineal_2, newdata = train_svm)
+pred_train_3 <- predict(svm_rbf_1,    newdata = train_svm)
+pred_train_4 <- predict(svm_poly_1,   newdata = train_svm)
+
+acc_train <- c(
+  mean(pred_train_1 == train_svm$price_category),
+  mean(pred_train_2 == train_svm$price_category),
+  mean(pred_train_3 == train_svm$price_category),
+  mean(pred_train_4 == train_svm$price_category)
+)
+
+acc_test <- c(0.5972, 0.5973, 0.6150, 0.5367)
+
+tabla_ajuste <- data.frame(
+  Modelo     = c("Lineal C=0.1", "Lineal C=10", "RBF C=1 γ=0.01", "Polinomial d=3"),
+  Acc_Train  = round(acc_train, 4),
+  Acc_Test   = acc_test,
+  Diferencia = round(acc_train - acc_test, 4)
+)
+
+knitr::kable(tabla_ajuste,
+             col.names = c("Modelo", "Accuracy Train", "Accuracy Test", "Diferencia"),
+             caption = "Comparación de ajuste: entrenamiento vs prueba")
+```
+Las diferencias entre accuracy de entrenamiento y prueba son prácticamente nulas en los cuatro modelos, por lo que ninguno presenta sobreajuste. Sin embargo, el accuracy moderado en ambos conjuntos (~60%) indica un desajuste leve, los modelos no capturan completamente la complejidad del problema.
+
+El modelo RBF es el más estable con diferencia de 0, siendo el mejor balance entre capacidad y generalización. El polinomial presenta el peor caso: alta complejidad pero bajo desempeño en ambos conjuntos (~53.7%), confirmando que el grado 3 no fue adecuado para este dataset. Para corregir esto estaría bien un tuneo de hiperparámetros con validación cruzada.
