@@ -5,26 +5,150 @@ date: "2026-04-24"
 output: html_document
 ---
 
+Link de Github: https://github.com/Ikeel04/Lab6-MD.git
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+## Librerías y carga de datos
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+```{r librerias}
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(e1071)
+library(tidyr)
+library(scales)
+library(kableExtra)
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r carga-datos}
+load("listings.RData")
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+## Inciso 1
+### Conjuntos de entrenamiento y prueba
+
+Para mantener comparabilidad con todos los laboratorios anteriores, se utilizan los mismos conjuntos de entrenamiento y prueba generados. Las variables predictoras y la variable respuesta son las mismas que en entregas previas.
+
+```{r preparacion}
+listings$price <- as.numeric(gsub("[$,]", "", listings$price))
+listings <- listings %>% filter(!is.na(price), price > 0)
+
+p33 <- quantile(listings$price, 0.33, na.rm = TRUE)
+p66 <- quantile(listings$price, 0.66, na.rm = TRUE)
+
+listings$price_category <- cut(
+  listings$price,
+  breaks = c(-Inf, p33, p66, Inf),
+  labels = c("Economica", "Intermedia", "Cara")
+)
+
+vars_num <- c("accommodates", "bathrooms", "bedrooms", "beds",
+              "minimum_nights", "number_of_reviews", "review_scores_rating",
+              "reviews_per_month", "calculated_host_listings_count",
+              "availability_365")
+
+vars_disp <- intersect(vars_num, names(listings))
+datos <- listings[, c("price", vars_disp, "price_category")]
+
+# Imputación de NAs con mediana
+for (col in c("price", vars_disp)) {
+  datos[[col]][is.na(datos[[col]])] <- median(datos[[col]], na.rm = TRUE)
+}
+
+set.seed(123)
+idx <- createDataPartition(datos$price_category, p = 0.70, list = FALSE)
+
+train_data <- datos[idx, ]
+test_data  <- datos[-idx, ]
+
+cat("Entrenamiento:", nrow(train_data), "observaciones\n")
+cat("Prueba       :", nrow(test_data),  "observaciones\n")
+cat("Distribución de clases en entrenamiento:\n")
+print(prop.table(table(train_data$price_category)) * 100)
+```
+El dataset quedó dividido manteniendo la proporción 70/30. La distribución de clases es prácticamente uniforme.
+
+## Inciso 2
+### Exploración y transformaciones para SVM
+
+```{r exploracion y distribucion}
+dist_clases <- as.data.frame(prop.table(table(train_data$price_category)) * 100)
+names(dist_clases) <- c("Categoria", "Porcentaje")
+
+ggplot(dist_clases, aes(x = Categoria, y = Porcentaje, fill = Categoria)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  geom_text(aes(label = paste0(round(Porcentaje, 1), "%")), vjust = -0.5) +
+  scale_fill_manual(values = c("Economica" = "#3498db",
+                               "Intermedia" = "#f39c12",
+                               "Cara"       = "#e74c3c")) +
+  labs(title = "Distribución de categorías de precio – Conjunto de entrenamiento",
+       x = "", y = "Porcentaje (%)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+```{r exploracion-boxplots}
+# Relación entre variables clave y categoría de precio
+train_long <- train_data %>%
+  select(price_category, accommodates, bedrooms, review_scores_rating) %>%
+  pivot_longer(-price_category, names_to = "Variable", values_to = "Valor")
+
+ggplot(train_long, aes(x = price_category, y = Valor, fill = price_category)) +
+  geom_boxplot(alpha = 0.7, outlier.size = 0.8) +
+  facet_wrap(~ Variable, scales = "free_y") +
+  scale_fill_manual(values = c("Economica" = "#3498db",
+                               "Intermedia" = "#f39c12",
+                               "Cara"       = "#e74c3c")) +
+  labs(title = "Distribución de variables clave por categoría de precio",
+       x = "Categoría", y = "Valor") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+Los boxplots confirman que las variables accommodates y bedrooms tienen una gran influencia entre categorías, las propiedades caras tienen mediana de capacidad y habitaciones notablemente mayor que las económicas. En cambio, review_scores_rating muestra distribuciones casi idénticas entre las tres categorías, lo que indica que la calificación de los huéspedes no es un predictor relevante del precio en este dataset. Esto es relevante para SmartStay: una propiedad bien calificada no necesariamente es cara, por lo que el precio depende más de características físicas que de la percepción del cliente.
+
+```{r escalado}
+predictores <- vars_disp
+
+x_train <- scale(train_data[, predictores])
+x_test  <- scale(test_data[, predictores],
+                 center = attr(x_train, "scaled:center"),
+                 scale  = attr(x_train, "scaled:scale"))
+
+# Reconstruimos los data frames escalados con la variable respuesta
+train_svm <- as.data.frame(x_train)
+train_svm$price_category <- train_data$price_category
+
+test_svm  <- as.data.frame(x_test)
+test_svm$price_category  <- test_data$price_category
+
+cat("Verificación de escala (media y SD de 'accommodates' en train):\n")
+cat("  Media:", round(mean(train_svm$accommodates), 4), "\n")
+cat("  SD   :", round(sd(train_svm$accommodates),   4), "\n")
+```
+
+
+## Inciso 3 
+### Variable respuesta: categoría de precio
+
+La variable respuesta es price_category, construida en entregas anteriores a partir de los percentiles 33 y 66 del precio.
+
+```{r tabla de clases}
+tabla_clases <- data.frame(
+  Categoria  = c("Económica", "Intermedia", "Cara"),
+  Umbral     = c(paste0("≤ $", round(p33, 2)),
+                 paste0("$", round(p33, 2), " – $", round(p66, 2)),
+                 paste0("> $", round(p66, 2))),
+  N_train    = as.integer(table(train_data$price_category)),
+  Pct_train  = paste0(round(prop.table(table(train_data$price_category)) * 100, 1), "%")
+)
+
+knitr::kable(tabla_clases,
+             col.names = c("Categoría", "Rango de precio", "N (train)", "% (train)"),
+             caption   = "Definición y distribución de la variable respuesta")
+```
+
+Las propiedades económicas tienen un precio de hasta 141 USD por noche, las intermedias entre 141 y 264, y las caras superan los 264. Con 17,630, 17,615 y 18,128 observaciones respectivamente en entrenamiento, las clases se miran balanceadas, lo que es una condición favorable para SVM ya que el hiperplano separador no se verá forzado hacia ninguna clase dominante.
