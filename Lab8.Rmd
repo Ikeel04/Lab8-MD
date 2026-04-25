@@ -23,6 +23,7 @@ library(scales)
 library(kableExtra)
 library(reshape2)
 library(gridExtra)
+library(nnet)
 ```
 
 ```{r carga-datos}
@@ -311,3 +312,114 @@ knitr::kable(tabla_ajuste,
 Las diferencias entre accuracy de entrenamiento y prueba son prácticamente nulas en los cuatro modelos, por lo que ninguno presenta sobreajuste. Sin embargo, el accuracy moderado en ambos conjuntos (~60%) indica un desajuste leve, los modelos no capturan completamente la complejidad del problema.
 
 El modelo RBF es el más estable con diferencia de 0, siendo el mejor balance entre capacidad y generalización. El polinomial presenta el peor caso: alta complejidad pero bajo desempeño en ambos conjuntos (~53.7%), confirmando que el grado 3 no fue adecuado para este dataset. Para corregir esto estaría bien un tuneo de hiperparámetros con validación cruzada.
+
+## Inciso 8
+### Comparación entre modelos SVM: efectividad, tiempo y errores
+
+```{r tiempo de prediccion}
+t1 <- system.time(predict(svm_lineal_1, newdata = test_svm))["elapsed"]
+t2 <- system.time(predict(svm_lineal_2, newdata = test_svm))["elapsed"]
+t3 <- system.time(predict(svm_rbf_1,    newdata = test_svm))["elapsed"]
+t4 <- system.time(predict(svm_poly_1,   newdata = test_svm))["elapsed"]
+```
+
+```{r tabla comparacion svm}
+byclass_1 <- round(cm1$byClass[, c("Sensitivity", "Specificity", "F1")], 4)
+byclass_3 <- round(cm3$byClass[, c("Sensitivity", "Specificity", "F1")], 4)
+
+tabla_comp_svm <- data.frame(
+  Modelo      = c("Lineal C=0.1", "Lineal C=10", "RBF C=1 γ=0.01", "Polinomial d=3"),
+  Kernel      = c("linear", "linear", "radial", "polynomial"),
+  Accuracy    = c(0.5972, 0.5973, 0.6150, 0.5367),
+  Kappa       = c(0.3956, 0.3957, 0.4225, 0.3070),
+  Tiempo_pred = c(round(t1, 3), round(t2, 3), round(t3, 3), round(t4, 3))
+)
+
+knitr::kable(tabla_comp_svm,
+             col.names = c("Modelo", "Kernel", "Accuracy", "Kappa", "Tiempo pred. (seg)"),
+             caption   = "Comparación de modelos SVM – efectividad y tiempo de predicción")
+```
+
+```{r grafico comparacion svm}
+ggplot(tabla_comp_svm, aes(x = reorder(Modelo, Accuracy), y = Accuracy, fill = Modelo)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  geom_text(aes(label = round(Accuracy, 4)), hjust = -0.15, size = 4) +
+  coord_flip() +
+  ylim(0, 0.75) +
+  labs(title = "Comparación de Accuracy – Modelos SVM",
+       x = "", y = "Accuracy") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+El modelo RBF fue el más lento con 56.97 segundos, casi el doble que los modelos lineales (~29 seg), lo que se explica porque el kernel radial debe evaluar la función gaussiana para cada vector de soporte. El modelo polinomial tardó 37.14 segundos. Para SmartStay, donde las recomendaciones se hacen en tiempo real, esta diferencia es relevante: un modelo lineal responde más rápido, pero sacrifica ~1.8 puntos de accuracy frente al RBF.
+
+
+```{r analisis errores svm}
+errores_rbf  <- as.data.frame(cm3$byClass[, c("Sensitivity", "Specificity", "F1")])
+errores_poly <- as.data.frame(cm4$byClass[, c("Sensitivity", "Specificity", "F1")])
+
+errores_rbf$Modelo  <- "RBF (mejor)"
+errores_rbf$Clase   <- rownames(errores_rbf)
+errores_poly$Modelo <- "Polinomial (peor)"
+errores_poly$Clase  <- rownames(errores_poly)
+
+errores_combined <- rbind(errores_rbf, errores_poly)
+
+knitr::kable(round(errores_rbf[, c("Sensitivity","Specificity","F1")], 4),
+             caption = "Métricas por clase – Modelo RBF (mejor SVM)")
+
+knitr::kable(round(errores_poly[, c("Sensitivity","Specificity","F1")], 4),
+             caption = "Métricas por clase – Modelo Polinomial (peor SVM)")
+```
+El modelo RBF detecta mejor la clase Económica (Sensitivity = 0.7085) y tiene un F1 equilibrado entre las tres clases (0.68, 0.48, 0.68). La clase Intermedia es la más difícil en ambos modelos, con el F1 más bajo (0.4751 en RBF, 0.4309 en Polinomial), confirmando el traslape natural con las otras categorías. El modelo Polinomial muestra un patrón preocupante: detecta bien las propiedades Económicas (Sensitivity = 0.8462) pero falla gravemente en las Caras (Sensitivity = 0.3182), lo que significaría que SmartStay clasificaría propiedades premium como baratas con frecuencia, un error crítico para el negocio.
+
+
+## Inciso 9
+### Comparación del mejor SVM con modelos de entregas anteriores
+
+```{r regresion logistica}
+set.seed(123)
+tiempo_lr <- system.time({
+  modelo_lr <- multinom(price_category ~ ., data = train_svm, trace = FALSE)
+})
+
+pred_lr <- predict(modelo_lr, newdata = test_svm)
+cm_lr   <- confusionMatrix(pred_lr, test_svm$price_category)
+
+cat("Regresión Logística Multinomial\n")
+cat("Accuracy:", round(cm_lr$overall["Accuracy"], 4), "\n")
+cat("Kappa   :", round(cm_lr$overall["Kappa"],    4), "\n")
+cat("Tiempo  :", round(tiempo_lr["elapsed"], 3), "seg\n")
+```
+
+```{r tabla-comparacion-todos}
+comparacion_final <- data.frame(
+  Modelo      = c("Naive Bayes", "SVM RBF (Lab8)", "Regresión Logística",
+                  "KNN (k=31)",  "Árbol de Decisión", "Random Forest"),
+  Accuracy    = c(0.5886, 0.6150, round(cm_lr$overall["Accuracy"], 4),
+                  0.6661, 0.6896, 0.8593),
+  Kappa       = c(0.3549, 0.4225, round(cm_lr$overall["Kappa"], 4),
+                  0.4414, NA,     0.7714),
+  Tiempo_seg  = c(0.055,  NA,     round(tiempo_lr["elapsed"], 3),
+                  NA,     0.517,  0.523)
+)
+
+knitr::kable(comparacion_final,
+             col.names = c("Modelo", "Accuracy", "Kappa", "Tiempo (seg)"),
+             caption   = "Comparación final – Modelos de clasificación (misma partición 70/30)")
+```
+
+```{r grafico comparacion todos}
+ggplot(comparacion_final,
+       aes(x = reorder(Modelo, Accuracy), y = Accuracy, fill = Modelo)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  geom_text(aes(label = round(Accuracy, 4)), hjust = -0.15, size = 3.8) +
+  coord_flip() +
+  ylim(0, 1) +
+  labs(title = "Comparación de Accuracy – Todos los modelos de clasificación",
+       x = "", y = "Accuracy") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+Random Forest domina con Accuracy = 0.8593 y Kappa = 0.7714, muy por encima de todos los demás. El Árbol de Decisión (0.6896) y el KNN tuneado (0.6661) ocupan el segundo y tercer lugar. El SVM RBF queda en cuarta posición (0.6150), superando a la Regresión Logística (0.6024) y al Naive Bayes (0.5886).
+En cuanto al tiempo, Naive Bayes fue el más rápido (0.055 seg) seguido del Árbol de Decisión (0.517 seg) y Random Forest (0.523 seg). La Regresión Logística tardó 1.77 seg. El SVM RBF fue el más lento de todos con casi 57 segundos de predicción, lo que lo hace poco práctico para un sistema de recomendación en tiempo real a pesar de su desempeño moderado. Para SmartStay, Random Forest sigue siendo la mejor opción considerando tanto precisión como tiempo de procesamiento.
