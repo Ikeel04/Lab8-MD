@@ -423,3 +423,92 @@ ggplot(comparacion_final,
 ```
 Random Forest domina con Accuracy = 0.8593 y Kappa = 0.7714, muy por encima de todos los demás. El Árbol de Decisión (0.6896) y el KNN tuneado (0.6661) ocupan el segundo y tercer lugar. El SVM RBF queda en cuarta posición (0.6150), superando a la Regresión Logística (0.6024) y al Naive Bayes (0.5886).
 En cuanto al tiempo, Naive Bayes fue el más rápido (0.055 seg) seguido del Árbol de Decisión (0.517 seg) y Random Forest (0.523 seg). La Regresión Logística tardó 1.77 seg. El SVM RBF fue el más lento de todos con casi 57 segundos de predicción, lo que lo hace poco práctico para un sistema de recomendación en tiempo real a pesar de su desempeño moderado. Para SmartStay, Random Forest sigue siendo la mejor opción considerando tanto precisión como tiempo de procesamiento.
+
+## Inciso 10
+### Análisis de sobreajuste
+```{r sobreajuste-todos}
+acc_train_lr  <- mean(predict(modelo_lr,  newdata = train_svm) == train_svm$price_category)
+acc_train_svm1 <- mean(predict(svm_lineal_1, newdata = train_svm) == train_svm$price_category)
+acc_train_svm2 <- mean(predict(svm_lineal_2, newdata = train_svm) == train_svm$price_category)
+acc_train_svm3 <- mean(predict(svm_rbf_1,    newdata = train_svm) == train_svm$price_category)
+acc_train_svm4 <- mean(predict(svm_poly_1,   newdata = train_svm) == train_svm$price_category)
+
+tabla_sobreajuste <- data.frame(
+  Modelo      = c("Naive Bayes", "KNN (k=31)", "Árbol de Decisión",
+                  "Random Forest", "Reg. Logística",
+                  "SVM Lineal C=0.1", "SVM Lineal C=10",
+                  "SVM RBF", "SVM Polinomial"),
+  Acc_Train   = c(0.5901, 0.6928, 0.7201, 0.9998,
+                  round(acc_train_lr,   4),
+                  round(acc_train_svm1, 4),
+                  round(acc_train_svm2, 4),
+                  round(acc_train_svm3, 4),
+                  round(acc_train_svm4, 4)),
+  Acc_Test    = c(0.5886, 0.6661, 0.6896, 0.8593,
+                  0.6024, 0.5972, 0.5972, 0.6150, 0.5367),
+  Diferencia  = c(0.5901 - 0.5886, 0.6928 - 0.6661,
+                  0.7201 - 0.6896, 0.9998 - 0.8593,
+                  round(acc_train_lr   - 0.6024, 4),
+                  round(acc_train_svm1 - 0.5972, 4),
+                  round(acc_train_svm2 - 0.5972, 4),
+                  round(acc_train_svm3 - 0.6150, 4),
+                  round(acc_train_svm4 - 0.5367, 4))
+)
+
+knitr::kable(tabla_sobreajuste,
+             col.names = c("Modelo", "Accuracy Train", "Accuracy Test", "Diferencia"),
+             caption   = "Análisis de sobreajuste – comparación entrenamiento vs prueba")
+```
+De los modelos evaluados, Random Forest es el único con sobreajuste claro, con una diferencia de 14 puntos entre entrenamiento y prueba. KNN y el Árbol de Decisión muestran diferencias menores pero perceptibles. Los modelos SVM y la Regresión Logística generalizan bien, con diferencias cercanas a cero, siendo el SVM RBF el más estable.
+
+## Inciso 11
+### Modelo SVM de regresión – variable precio
+
+```{r svm-regresion-datos}
+train_reg <- as.data.frame(x_train)
+train_reg$price <- train_data$price
+
+test_reg <- as.data.frame(x_test)
+test_reg$price <- test_data$price
+```
+
+```{r svm-regresion-tune}
+set.seed(123)
+tune_svm_reg <- tune(
+  svm,
+  price ~ .,
+  data    = train_reg,
+  kernel  = "radial",
+  ranges  = list(
+    cost  = c(1, 10),
+    gamma = c(0.01, 0.1)
+  ),
+  tunecontrol = tune.control(cross = 3)
+)
+
+cat("Mejores parámetros:\n")
+print(tune_svm_reg$best.parameters)
+
+cat("\nRendimiento por combinación:\n")
+print(tune_svm_reg$performances)
+```
+
+```{r svm-regresion-mejor}
+svm_reg_best <- tune_svm_reg$best.model
+
+pred_reg <- predict(svm_reg_best, newdata = test_reg)
+
+rmse <- sqrt(mean((pred_reg - test_reg$price)^2))
+mae  <- mean(abs(pred_reg - test_reg$price))
+r2   <- 1 - sum((pred_reg - test_reg$price)^2) /
+            sum((test_reg$price - mean(test_reg$price))^2)
+
+cat("=== Mejor modelo SVM Regresión ===\n")
+cat("Kernel:", tune_svm_reg$best.parameters$kernel, "\n")
+cat("Cost  :", tune_svm_reg$best.parameters$cost,   "\n")
+cat("Gamma :", tune_svm_reg$best.parameters$gamma,  "\n")
+cat("RMSE  :", round(rmse, 2), "\n")
+cat("MAE   :", round(mae,  2), "\n")
+cat("R²    :", round(r2,   4), "\n")
+```
+El modelo SVM de regresión con kernel radial, tras el tuneo automático, seleccionó C=10 y γ=0.1 como mejores parámetros. Sin embargo, las métricas indican un desempeño limitado: el R² de 0.2348 significa que el modelo solo explica el 23.5% de la variabilidad del precio, lo cual es bajo para un modelo de regresión. El RMSE de 3,559.82 y el MAE de 589.17 indican errores considerables en las predicciones, lo que sugiere que el precio como variable numérica tiene una distribución muy dispersa y con valores extremos que el SVM tiene dificultad para capturar. Esto es consistente con lo observado en los modelos de clasificación, donde ningún modelo logró superar el 62% de accuracy, confirmando que las variables disponibles explican parcialmente el precio pero no lo determinan por completo.
