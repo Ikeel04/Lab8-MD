@@ -512,3 +512,96 @@ cat("MAE   :", round(mae,  2), "\n")
 cat("R²    :", round(r2,   4), "\n")
 ```
 El modelo SVM de regresión con kernel radial, tras el tuneo automático, seleccionó C=10 y γ=0.1 como mejores parámetros. Sin embargo, las métricas indican un desempeño limitado: el R² de 0.2348 significa que el modelo solo explica el 23.5% de la variabilidad del precio, lo cual es bajo para un modelo de regresión. El RMSE de 3,559.82 y el MAE de 589.17 indican errores considerables en las predicciones, lo que sugiere que el precio como variable numérica tiene una distribución muy dispersa y con valores extremos que el SVM tiene dificultad para capturar. Esto es consistente con lo observado en los modelos de clasificación, donde ningún modelo logró superar el 62% de accuracy, confirmando que las variables disponibles explican parcialmente el precio pero no lo determinan por completo.
+
+##Inciso 12
+```{r}
+# Tabla comparativa de modelos de regresión
+comparacion_reg <- data.frame(
+  Modelo = c(
+    "Árbol de Regresión (d=10)",
+    "KNN (tuneado)",
+    "Regresión Lineal Múltiple",
+    "SVR (RBF, C=10, γ=0.1)",
+    "Naive Bayes (laplace=0)*"
+  ),
+  RMSE = c(2044.19, 3005.69, 3011.84, 3559.82, 1761.22),
+  MAE  = c(423.20,  483.61,  739.71,  589.17,  688.36),
+  R2   = c(0.7721,  0.5141,  0.4968,  0.2348, -4.9941)
+)
+
+# Tabla con kableExtra
+knitr::kable(
+  comparacion_reg,
+  col.names = c("Modelo", "RMSE", "MAE", "R²"),
+  caption   = "Comparación de modelos de regresión – Inciso 12",
+  digits    = 2
+) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = FALSE) %>%
+  row_spec(which(comparacion_reg$Modelo == "Árbol de Regresión (d=10)"),
+           bold = TRUE, color = "white", background = "#27ae60") %>%
+  row_spec(which(comparacion_reg$Modelo == "SVR (RBF, C=10, γ=0.1)"),
+           bold = TRUE, color = "white", background = "#e74c3c") %>%
+  footnote(general = "* Naive Bayes evaluado sobre una submuestra distinta (R² negativo indica peor desempeño que predecir la media). No es directamente comparable con los demás modelos.")
+
+# Gráfico comparativo de RMSE (excluyendo Naive Bayes por inconsistencia metodológica)
+comparacion_plot <- comparacion_reg[comparacion_reg$Modelo != "Naive Bayes (laplace=0)*", ]
+
+ggplot(comparacion_plot,
+       aes(x = reorder(Modelo, RMSE), y = RMSE, fill = Modelo)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  geom_text(aes(label = round(RMSE, 2)), hjust = -0.15, size = 4) +
+  coord_flip() +
+  ylim(0, 4500) +
+  scale_fill_manual(values = c(
+    "Árbol de Regresión (d=10)"  = "#27ae60",
+    "KNN (tuneado)"              = "#3498db",
+    "Regresión Lineal Múltiple"  = "#f39c12",
+    "SVR (RBF, C=10, γ=0.1)"    = "#e74c3c"
+  )) +
+  labs(
+    title   = "Comparación de RMSE – Modelos de regresión",
+    subtitle = "Menor RMSE = mejor desempeño predictivo",
+    x = "", y = "RMSE"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+# Gráfico comparativo de R²
+ggplot(comparacion_plot,
+       aes(x = reorder(Modelo, R2), y = R2, fill = Modelo)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  geom_text(aes(label = round(R2, 4)), hjust = -0.15, size = 4) +
+  coord_flip() +
+  ylim(0, 1) +
+  scale_fill_manual(values = c(
+    "Árbol de Regresión (d=10)"  = "#27ae60",
+    "KNN (tuneado)"              = "#3498db",
+    "Regresión Lineal Múltiple"  = "#f39c12",
+    "SVR (RBF, C=10, γ=0.1)"    = "#e74c3c"
+  )) +
+  labs(
+    title    = "Comparación de R² – Modelos de regresión",
+    subtitle = "Mayor R² = mayor variabilidad explicada",
+    x = "", y = "R²"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+Al comparar los modelos de regresión evaluados sobre el conjunto de prueba, el Árbol de 
+Regresión con profundidad 10 es el mejor modelo con un RMSE de 2,044 y un R² de 0.77, 
+explicando el 77% de la variabilidad del precio. Esto se debe a su capacidad para capturar 
+relaciones no lineales entre variables como accommodates, bedrooms y bathrooms, que un modelo 
+lineal no puede modelar adecuadamente. Le siguen KNN tuneado (RMSE = 3,005, R² = 0.51) y 
+Regresión Lineal Múltiple (RMSE = 3,011, R² = 0.50), prácticamente empatados, explicando 
+alrededor de la mitad de la variabilidad del precio.
+
+El SVR con kernel RBF quedó en la última posición entre los modelos comparables, con el RMSE 
+más alto (3,559) y el R² más bajo (0.23). Aunque el tuneo automático seleccionó C=10 y γ=0.1 
+como mejores parámetros, el espacio de búsqueda fue limitado (solo 4 combinaciones), lo que 
+restringe su potencial. Adicionalmente, la distribución altamente dispersa del precio con 
+valores extremos dificulta que el SVM encuentre una función de regresión adecuada. Para 
+SmartStay, el Árbol de Regresión sigue siendo la herramienta más confiable para estimar 
+precios numéricos de propiedades.
+
+**Nota de Naive Bayes** aunque tiene el RMSE más bajo (1,761), su R² de −4.99 es un mal indicio. Un R² negativo significa que el modelo es peor que simplemente predecir la media del precio para todos los casos. Esto ocurre porque el modelo fue evaluado sobre test_reg2, que es solo el 30% de una muestra del 30% del dataset original, lo que hace que su RMSE bajo no sea comparable directamente con los demás modelos que usaron particiones distintas
